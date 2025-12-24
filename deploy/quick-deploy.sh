@@ -49,7 +49,9 @@ chmod -R 755 /var/forensics
 
 # Step 5: Configure environment
 echo "⚙️  [5/7] Configuring environment..."
-cd /root/forensicWeb
+# Use parent directory of deploy script
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+cd "$SCRIPT_DIR/.."
 
 if [ ! -f ".env" ]; then
     cat > .env << 'EOF'
