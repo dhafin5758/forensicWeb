@@ -1,0 +1,135 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: forensics_db
+    environment:
+      POSTGRES_USER: forensics
+      POSTGRES_PASSWORD: forensics_secure_password
+      POSTGRES_DB: forensics_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U forensics"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - forensics_network
+
+  # Redis (Message Broker & Cache)
+  redis:
+    image: redis:7-alpine
+    container_name: forensics_redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - forensics_network
+
+  # FastAPI Application
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: forensics_api
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://forensics:forensics_secure_password@postgres/forensics_db
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - SECRET_KEY=${SECRET_KEY}
+      - STORAGE_ROOT=/var/forensics
+    volumes:
+      - ./backend:/app/backend
+      - forensics_storage:/var/forensics
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - forensics_network
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --workers 4
+
+  # Celery Worker
+  worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    container_name: forensics_worker
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://forensics:forensics_secure_password@postgres/forensics_db
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - STORAGE_ROOT=/var/forensics
+      - VOL3_PATH=/usr/local/bin/vol
+      - BINWALK_PATH=/usr/bin/binwalk
+      - EXIFTOOL_PATH=/usr/bin/exiftool
+    volumes:
+      - ./backend:/app/backend
+      - forensics_storage:/var/forensics
+    depends_on:
+      - redis
+      - postgres
+    networks:
+      - forensics_network
+    command: celery -A backend.workers.celery_app worker --loglevel=info --concurrency=2
+
+  # Celery Flower (Monitoring)
+  flower:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    container_name: forensics_flower
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+    ports:
+      - "5555:5555"
+    depends_on:
+      - redis
+      - worker
+    networks:
+      - forensics_network
+    command: celery -A backend.workers.celery_app flower --port=5555
+
+  # Nginx (Reverse Proxy & Static Files)
+  nginx:
+    image: nginx:alpine
+    container_name: forensics_nginx
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./frontend:/usr/share/nginx/html:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - api
+    networks:
+      - forensics_network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  forensics_storage:
+    driver: local
+
+networks:
+  forensics_network:
+    driver: bridge
