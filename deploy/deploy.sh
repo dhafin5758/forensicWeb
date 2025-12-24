@@ -64,6 +64,30 @@ fi
 # Create environment file
 echo "[5/8] Configuring environment..."
 if [ ! -f ".env" ]; then
+    # Create .env.example if it doesn't exist
+    if [ ! -f ".env.example" ]; then
+        cat > .env.example << 'EOF'
+# Environment Configuration for Forensics Platform
+DEBUG=false
+ENVIRONMENT=production
+SECRET_KEY=CHANGE_THIS_TO_A_SECURE_RANDOM_STRING_AT_LEAST_32_CHARS
+API_HOST=0.0.0.0
+API_PORT=8000
+API_WORKERS=4
+ALLOWED_ORIGINS=["http://localhost:3000","https://yourdomain.com"]
+STORAGE_ROOT=/var/forensics
+MAX_UPLOAD_SIZE_GB=20
+DATABASE_URL=postgresql+asyncpg://forensics:CHANGE_THIS_PASSWORD@postgres/forensics_db
+REDIS_URL=redis://redis:6379/0
+CELERY_BROKER_URL=redis://redis:6379/1
+CELERY_RESULT_BACKEND=redis://redis:6379/2
+CELERY_WORKER_CONCURRENCY=2
+VOL3_PATH=/usr/local/bin/vol
+BINWALK_PATH=/usr/bin/binwalk
+EXIFTOOL_PATH=/usr/bin/exiftool
+UPLOAD_TIMEOUT_SECONDS=3600
+EOF
+    fi
     cp .env.example .env
     
     # Generate secure secret key
